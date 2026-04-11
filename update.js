@@ -1,9 +1,9 @@
 /**
  * update.js
- * 全台データを取得し graph.html を更新する
- * 使い方: node update.js
+ * 全台データをHTTP取得（regexで解析）し graph.html を更新する
+ * Playwrightを使わないので GitHub Actions でも安定動作
  */
-const { chromium } = require('playwright');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,72 +14,92 @@ const TEMPLATE_FILE = path.join(DIR, 'graph_template.html');
 const OUTPUT_FILE = path.join(DIR, 'graph.html');
 
 // ============================================================
-// データ取得
+// HTTP取得
 // ============================================================
-async function fetchUnit(page, unit) {
-  const url = `https://daidata.goraggio.com/100563/detail?unit=${unit}`;
-  await page.goto(url, { waitUntil: 'load', timeout: 60000 });
-  await page.waitForFunction(() => {
-    const c = document.querySelector('[id^="WeeklyCanvas"]');
-    return c && $(c).data('jqplot');
-  }, { timeout: 15000 }).catch(() => {});
-
-  return page.evaluate(() => {
-    const canvas = document.querySelector('[id^="WeeklyCanvas"]');
-    if (!canvas) return null;
-    const inst = $(canvas).data('jqplot');
-    if (!inst) return null;
-    return {
-      data: inst.series[0]?.data || [],
-      xaxis: inst.axes?.xaxis?.ticks || [],
-    };
+function fetchHtml(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.7,en;q=0.3',
+        'Referer': 'https://daidata.goraggio.com/',
+      },
+    }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchHtml(res.headers.location).then(resolve).catch(reject);
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => { req.destroy(); reject(new Error('timeout')); });
   });
 }
 
-function buildPoints(raw) {
-  const ticks = raw.xaxis.filter(t => t[1] !== '');
-  const dateMap = ticks.map((t, i) => ({
+// ============================================================
+// HTMLからjqplotデータを抽出
+// ============================================================
+function parseHtml(html) {
+  // jqplot配列データを抽出
+  const dataMatch = html.match(/\.jqplot\s*\(\s*(\[\s*\[[\s\S]*?\]\s*\])\s*,/);
+  if (!dataMatch) return null;
+
+  let rawData;
+  try {
+    rawData = JSON.parse(dataMatch[1]);
+  } catch (e) {
+    return null;
+  }
+
+  // X軸ラベル（日付）を抽出
+  const ticksMatch = html.match(/ticks\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
+  let ticks = [];
+  if (ticksMatch) {
+    try { ticks = JSON.parse(ticksMatch[1]); } catch (e) {}
+  }
+
+  // 日付マッピング
+  const dateTicks = ticks.filter(t => Array.isArray(t) && t[1] !== '');
+  const dateMap = dateTicks.map((t, i) => ({
     date: t[1],
     startIdx: t[0],
-    endIdx: ticks[i + 1] ? ticks[i + 1][0] - 1 : raw.data.length - 1,
+    endIdx: dateTicks[i + 1] ? dateTicks[i + 1][0] - 1 : rawData.length - 1,
   }));
-  return raw.data.map(([idx, value]) => {
+
+  const points = rawData.map(([idx, value]) => {
     const entry = dateMap.find(d => idx >= d.startIdx && idx <= d.endIdx);
     return { idx, date: entry?.date || '?', value };
   });
+
+  return { points, dateMap };
 }
 
+// ============================================================
+// 全台取得
+// ============================================================
 async function fetchAll() {
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
   const results = [];
-
   for (const unit of UNITS) {
+    const url = `https://daidata.goraggio.com/100563/detail?unit=${unit}`;
     process.stdout.write(`取得中: 台${unit} ... `);
     try {
-      const raw = await fetchUnit(page, unit);
-      if (raw) {
-        results.push({ unit, points: buildPoints(raw), dateMap: buildDateMap(raw) });
-        process.stdout.write('OK\n');
+      const html = await fetchHtml(url);
+      const parsed = parseHtml(html);
+      if (parsed && parsed.points.length > 0) {
+        results.push({ unit, ...parsed });
+        process.stdout.write(`OK (${parsed.points.length}ポイント)\n`);
       } else {
         process.stdout.write('データなし\n');
       }
     } catch (e) {
       process.stdout.write(`エラー: ${e.message}\n`);
     }
+    // サーバー負荷軽減のため少し待機
+    await new Promise(r => setTimeout(r, 500));
   }
-
-  await browser.close();
   return results;
-}
-
-function buildDateMap(raw) {
-  const ticks = raw.xaxis.filter(t => t[1] !== '');
-  return ticks.map((t, i) => ({
-    date: t[1],
-    startIdx: t[0],
-    endIdx: ticks[i + 1] ? ticks[i + 1][0] - 1 : raw.data.length - 1,
-  }));
 }
 
 // ============================================================
@@ -89,7 +109,7 @@ function updateHtml(data) {
   const template = fs.readFileSync(TEMPLATE_FILE, 'utf8');
   const html = template.replace('__GRAPH_DATA__', JSON.stringify(data));
   fs.writeFileSync(OUTPUT_FILE, html);
-  console.log(`graph.html を更新しました`);
+  console.log('graph.html を更新しました');
 }
 
 // ============================================================
@@ -100,12 +120,17 @@ function updateHtml(data) {
   console.log(`[${now}] データ取得開始`);
 
   const data = await fetchAll();
+  console.log(`\n取得完了: ${data.length}台`);
 
-  // JSONを保存（日付付きアーカイブ + 最新版）
+  if (data.length === 0) {
+    console.log('警告: データが取得できませんでした。graph.html は更新しません。');
+    process.exit(1);
+  }
+
   const dateStr = new Date().toISOString().slice(0, 10);
   fs.writeFileSync(path.join(DIR, `graph_data_${dateStr}.json`), JSON.stringify(data, null, 2));
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  console.log(`データを graph_data_${dateStr}.json に保存しました`);
+  console.log(`graph_data_${dateStr}.json に保存しました`);
 
   updateHtml(data);
   console.log('完了');
