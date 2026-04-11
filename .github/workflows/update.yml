@@ -32,6 +32,17 @@ jobs:
       - name: Fetch data & update graph.html
         run: node update.js
 
+      - name: Encrypt graph.html with password
+        env:
+          STATICRYPT_PASSWORD: ${{ secrets.GRAPH_PASSWORD }}
+        run: |
+          npx staticrypt@3 graph.html \
+            --password "$STATICRYPT_PASSWORD" \
+            --directory . \
+            --short \
+            --template-title "メッセ三鷹 データ" \
+            --template-instructions "パスワードを入力してください"
+
       - name: Commit updated files
         run: |
           git config user.name "github-actions[bot]"
