@@ -163,11 +163,17 @@ function buildChartData(span) {
 
   const datasets = GRAPH_DATA.map((u, i) => {
     const values = [];
+    let cumOffset = 0; // 前日終値を次の日の起点に加算
+
     for (const date of dates) {
       const pts = u.days[date] || [];
       const maxLen = dayMaxLen[date];
       for (let j = 0; j < maxLen; j++) {
-        values.push(j < pts.length ? pts[j] : null);
+        values.push(j < pts.length ? pts[j] + cumOffset : null);
+      }
+      // 次の日のオフセット = 当日の終値（1日表示は不要）
+      if (span !== 'day' && pts.length > 0) {
+        cumOffset += pts[pts.length - 1];
       }
     }
     return {
@@ -270,11 +276,16 @@ function redraw() {
 
 function finalVal(u) {
   const dates = getFilteredDates(currentSpan);
-  for (let i = dates.length - 1; i >= 0; i--) {
-    const pts = u.days[dates[i]];
-    if (pts && pts.length > 0) return pts[pts.length - 1];
+  if (currentSpan === 'day') {
+    // 1日: 当日の最終値
+    const pts = u.days[dates[0]];
+    return pts && pts.length > 0 ? pts[pts.length - 1] : 0;
   }
-  return 0;
+  // 複数日: 各日の終値を累積合算
+  return dates.reduce((sum, date) => {
+    const pts = u.days[date];
+    return sum + (pts && pts.length > 0 ? pts[pts.length - 1] : 0);
+  }, 0);
 }
 
 function renderRanking() {
