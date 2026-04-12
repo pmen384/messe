@@ -93,6 +93,9 @@ async function fetchAll(fetchDate) {
     process.stdout.write(`取得中: 台${unit} ... `);
     try {
       const html = await fetchHtml(url);
+      if (unit === UNITS[0]) {
+        process.stdout.write(`  [DEBUG] html length: ${html.length}, jqplot hits: ${(html.match(/\.jqplot/g)||[]).length}\n`);
+      }
       const parsed = parseHtml(html);
       if (parsed) {
         results.push({ unit, days: parsed.days });
