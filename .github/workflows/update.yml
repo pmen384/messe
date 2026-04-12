@@ -32,6 +32,7 @@ jobs:
           npx staticrypt@3 graph.html \
             --password "$STATICRYPT_PASSWORD" \
             --directory . \
+            --short \
             --template-title "メッセ三鷹 データ" \
             --template-instructions "パスワードを入力してください"
 

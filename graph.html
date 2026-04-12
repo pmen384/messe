@@ -78,6 +78,47 @@
     .rank-bar-wrap { flex: 1; height: 5px; background: #1e2235; border-radius: 3px; overflow: hidden; }
     .rank-bar { height: 100%; border-radius: 3px; }
     .rank-val { width: 80px; text-align: right; font-weight: 700; font-size: 12px; }
+
+    .prediction {
+      background: #1a1d2e; border: 1px solid #2a2d3e;
+      border-radius: 12px; padding: 18px; margin-top: 20px;
+    }
+    .prediction-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
+    }
+    .prediction-header h2 { font-size: 14px; color: #bbb; font-weight: 600; }
+    .prediction-note { font-size: 11px; color: #444; margin-bottom: 14px; }
+    .pred-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 8px;
+    }
+    .pred-card {
+      background: #0d0f1a; border-radius: 10px; padding: 12px 14px;
+      border: 1px solid transparent; transition: border-color 0.2s;
+    }
+    .pred-card.hot { border-color: #ff5252; }
+    .pred-card.warm { border-color: #ff9800; }
+    .pred-card.cold { border-color: #2e3148; }
+    .pred-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .pred-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 10px; white-space: nowrap;
+    }
+    .pred-badge.hot { background: #ff525230; color: #ff5252; }
+    .pred-badge.warm { background: #ff980030; color: #ff9800; }
+    .pred-badge.cold { background: #2e314880; color: #666; }
+    .pred-unit { font-size: 15px; font-weight: 700; }
+    .pred-score {
+      margin-left: auto; font-size: 12px; font-weight: 700;
+    }
+    .pred-rows { font-size: 11px; color: #666; display: flex; flex-direction: column; gap: 3px; }
+    .pred-row { display: flex; justify-content: space-between; }
+    .pred-row span:last-child { color: #999; }
+    .pred-reason {
+      margin-top: 8px; font-size: 11px; padding: 5px 8px;
+      background: #12141f; border-radius: 6px; color: #888; line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -107,6 +148,14 @@
 <div class="ranking">
   <h2 id="rankTitle">最終時点 持ち玉ランキング</h2>
   <div class="rank-grid" id="rankList"></div>
+</div>
+
+<div class="prediction">
+  <div class="prediction-header">
+    <h2>台予測（翌日注目台）</h2>
+  </div>
+  <p class="prediction-note">※ 過去データの傾向分析です。実際の出玉を保証するものではありません。</p>
+  <div class="pred-grid" id="predGrid"></div>
 </div>
 
 <script>
@@ -352,6 +401,111 @@ document.getElementById('btnBottom5').addEventListener('click', () =>
   setUnits([...GRAPH_DATA].sort((a,b) => finalVal(a)-finalVal(b)).slice(0,5).map(d=>d.unit)));
 
 redraw();
+
+// ============================================================
+// 台予測
+// ============================================================
+function calcPrediction() {
+  const sortedDates = ALL_DATES.slice().sort();
+  const recentDates = sortedDates.slice(-7); // 直近7日
+
+  return GRAPH_DATA.map((u, idx) => {
+    const dayResults = sortedDates.map(date => {
+      const pts = u.days[date];
+      if (!pts || pts.length === 0) return null;
+      return pts[pts.length - 1]; // 各日終値
+    }).filter(v => v !== null);
+
+    if (dayResults.length === 0) return null;
+
+    // 直近7日の終値
+    const recentResults = recentDates.map(date => {
+      const pts = u.days[date];
+      return pts && pts.length > 0 ? pts[pts.length - 1] : null;
+    }).filter(v => v !== null);
+
+    const totalDays = dayResults.length;
+    const avgDaily   = dayResults.reduce((s, v) => s + v, 0) / totalDays;
+    const recentAvg  = recentResults.length > 0
+      ? recentResults.reduce((s, v) => s + v, 0) / recentResults.length : avgDaily;
+
+    // 連続マイナス日数（直近から遡る）
+    let consecutiveLoss = 0;
+    for (let i = recentDates.length - 1; i >= 0; i--) {
+      const pts = u.days[recentDates[i]];
+      const v = pts && pts.length > 0 ? pts[pts.length - 1] : null;
+      if (v === null) break;
+      if (v < 0) consecutiveLoss++; else break;
+    }
+
+    // 直近の累積赤字額
+    const recentCumLoss = recentResults.reduce((s, v) => s + Math.min(v, 0), 0);
+
+    // スコア計算（高いほど「出やすい」予測）
+    // ・連続マイナス日数が多い → 高スコア
+    // ・直近の累積損失が大きい → 高スコア
+    // ・全体平均がマイナス → 高スコア
+    const score =
+      consecutiveLoss * 20
+      + Math.max(0, -recentCumLoss) / 1000
+      + Math.max(0, -avgDaily) / 500;
+
+    // 直近7日の勝ち/負け
+    const wins   = recentResults.filter(v => v > 0).length;
+    const losses = recentResults.filter(v => v < 0).length;
+
+    return {
+      unit: u.unit,
+      color: COLORS[idx % COLORS.length],
+      score: Math.round(score * 10) / 10,
+      consecutiveLoss,
+      recentAvg: Math.round(recentAvg),
+      recentCumLoss: Math.round(recentCumLoss),
+      totalDays,
+      wins,
+      losses,
+      avgDaily: Math.round(avgDaily),
+    };
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
+}
+
+function renderPrediction() {
+  const preds = calcPrediction();
+  const maxScore = preds[0]?.score || 1;
+
+  const grid = document.getElementById('predGrid');
+  grid.innerHTML = preds.slice(0, 9).map((p, rank) => {
+    const tier = rank < 3 ? 'hot' : rank < 6 ? 'warm' : 'cold';
+    const tierLabel = rank < 3 ? '🔥 注目' : rank < 6 ? '👀 要確認' : '❄️ 様子見';
+    const scorePct = (p.score / maxScore * 100).toFixed(0);
+
+    const reasons = [];
+    if (p.consecutiveLoss >= 3) reasons.push(`${p.consecutiveLoss}日連続マイナス`);
+    if (p.recentCumLoss < -20000) reasons.push(`直近累積 ${p.recentCumLoss.toLocaleString()}玉`);
+    if (p.recentAvg < -5000) reasons.push(`直近平均 ${p.recentAvg.toLocaleString()}玉/日`);
+    if (p.losses >= 5) reasons.push(`直近${p.losses}勝負中${p.losses}負`);
+
+    return `
+      <div class="pred-card ${tier}">
+        <div class="pred-top">
+          <span class="pred-badge ${tier}">${tierLabel}</span>
+          <span class="pred-unit" style="color:${p.color}">台${p.unit}</span>
+          <span class="pred-score" style="color:${tier==='hot'?'#ff5252':tier==='warm'?'#ff9800':'#555'}">
+            スコア ${scorePct}
+          </span>
+        </div>
+        <div class="pred-rows">
+          <div class="pred-row"><span>連続マイナス日数</span><span>${p.consecutiveLoss}日</span></div>
+          <div class="pred-row"><span>直近7日 勝/負</span><span>${p.wins}勝 ${p.losses}負</span></div>
+          <div class="pred-row"><span>直近平均終値</span><span>${p.recentAvg.toLocaleString()}玉</span></div>
+          <div class="pred-row"><span>直近累積</span><span>${p.recentCumLoss.toLocaleString()}玉</span></div>
+        </div>
+        ${reasons.length > 0 ? `<div class="pred-reason">📌 ${reasons.join(' / ')}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+renderPrediction();
 </script>
 </body>
 </html>
