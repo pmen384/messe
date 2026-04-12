@@ -155,15 +155,21 @@ function updateHtml(history) {
   const newData = await fetchAll(fetchDate);
   console.log(`\n取得完了: ${newData.length}台`);
 
-  if (newData.length === 0) {
-    console.log('警告: データが取得できませんでした。処理を中断します。');
-    process.exit(1);
-  }
-
-  // 履歴をマージ
   const existing = fs.existsSync(HISTORY_FILE)
     ? JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'))
     : [];
+
+  if (newData.length === 0) {
+    console.log('警告: 新規データなし。既存の history.json でグラフを更新します。');
+    if (existing.length === 0) {
+      console.log('エラー: 既存データもありません。終了します。');
+      process.exit(1);
+    }
+    updateHtml(existing);
+    console.log('完了（既存データ使用）');
+    return;
+  }
+
   const history = mergeHistory(existing, newData, fetchDate);
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
   console.log(`history.json を更新しました（${UNITS.length}台 × 最大${KEEP_DAYS}日）`);
