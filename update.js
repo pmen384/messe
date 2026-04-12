@@ -39,26 +39,34 @@ function fetchHtml(url) {
 }
 
 // ============================================================
-// HTMLからjqplotデータを抽出
+// HTMLからjqplotデータを抽出（全日別グラフを取得）
 // ============================================================
 function parseHtml(html) {
-  const dataMatch = html.match(/\.jqplot\s*\(\s*(\[\s*\[[\s\S]*?\]\s*\])\s*,/);
-  if (!dataMatch) return null;
-  let rawData;
-  try { rawData = JSON.parse(dataMatch[1]); } catch (e) { return null; }
+  const days = {};
 
-  const ticksMatch = html.match(/ticks\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
-  let ticks = [];
-  if (ticksMatch) { try { ticks = JSON.parse(ticksMatch[1]); } catch (e) {} }
+  // 全jqplot呼び出しをマッチ
+  const matches = [...html.matchAll(/\.jqplot\s*\(\s*(\[\[[\s\S]*?\]\])\s*,/g)];
+  for (const m of matches) {
+    let rawData;
+    try { rawData = JSON.parse(m[1]); } catch (e) { continue; }
+    if (!rawData.length) continue;
 
-  const dateTicks = ticks.filter(t => Array.isArray(t) && t[1] !== '');
-  const dateMap = dateTicks.map((t, i) => ({
-    date: t[1], // "M/D" 形式
-    startIdx: t[0],
-    endIdx: dateTicks[i + 1] ? dateTicks[i + 1][0] - 1 : rawData.length - 1,
-  }));
+    const series = Array.isArray(rawData[0][0]) ? rawData[0] : rawData;
+    if (!series.length) continue;
 
-  return { rawData, dateMap };
+    if (typeof series[0][0] === 'string') {
+      // 日別グラフ: [["YYYY-MM-DD HH:MM:SS", value], ...]
+      for (const [ts, value] of series) {
+        const date = ts.slice(0, 10);
+        if (!days[date]) days[date] = [];
+        days[date].push(value);
+      }
+    }
+    // 週間グラフ（index形式）はスキップ（日別グラフで補完済み）
+  }
+
+  if (Object.keys(days).length === 0) return null;
+  return { days };
 }
 
 // ============================================================
@@ -86,17 +94,9 @@ async function fetchAll(fetchDate) {
     try {
       const html = await fetchHtml(url);
       const parsed = parseHtml(html);
-      if (parsed && parsed.rawData.length > 0) {
-        // 日付ごとにvalues配列を作成
-        const days = {};
-        for (const dm of parsed.dateMap) {
-          const absDate = normalizeDate(dm.date, fetchDate);
-          days[absDate] = parsed.rawData
-            .filter(([idx]) => idx >= dm.startIdx && idx <= dm.endIdx)
-            .map(([, v]) => v);
-        }
-        results.push({ unit, days });
-        const totalPts = Object.values(days).reduce((s, a) => s + a.length, 0);
+      if (parsed) {
+        results.push({ unit, days: parsed.days });
+        const totalPts = Object.values(parsed.days).reduce((s, a) => s + a.length, 0);
         process.stdout.write(`OK (${totalPts}ポイント)\n`);
       } else {
         process.stdout.write('データなし\n');
