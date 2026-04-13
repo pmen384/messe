@@ -2,7 +2,7 @@ name: Update Graph Data
 
 on:
   schedule:
-    - cron: '0 15 * * *'  # JST 0:00 (UTC 15:00)
+    - cron: '30 14 * * *'  # JST 23:30 (UTC 14:30)
   workflow_dispatch:       # 手動実行も可能
 
 permissions:

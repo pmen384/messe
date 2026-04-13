@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>メッセ三鷹 e牙狼12 XX-MJ 持ち玉推移</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
@@ -152,7 +153,7 @@
 
 <div class="prediction">
   <div class="prediction-header">
-    <h2>台予測（翌日注目台）</h2>
+    <h2 id="predTitle">台予測（翌日注目台）</h2>
   </div>
   <p class="prediction-note">※ 過去データの傾向分析です。実際の出玉を保証するものではありません。</p>
   <div class="pred-grid" id="predGrid"></div>
@@ -504,6 +505,15 @@ function renderPrediction() {
       </div>`;
   }).join('');
 }
+
+// 翌日日付をタイトルに表示
+(function() {
+  const tomorrow = new Date(new Date(LAST_DATE).getTime() + 86400000);
+  const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+  const dd = String(tomorrow.getDate()).padStart(2, '0');
+  document.getElementById('predTitle').textContent =
+    `台予測（${mm}/${dd} 翌日注目台）`;
+})();
 
 renderPrediction();
 </script>
