@@ -307,6 +307,11 @@ function updatePredictionsHtml(predHistory) {
       process.exit(1);
     }
     updateHtml(existing);
+    updatePredictionsHtml(
+      fs.existsSync(PRED_HISTORY_FILE)
+        ? JSON.parse(fs.readFileSync(PRED_HISTORY_FILE, 'utf8'))
+        : []
+    );
     console.log('完了（既存データ使用）');
     return;
   }
