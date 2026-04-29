@@ -1,7 +1,11 @@
-name: Update Graph Data
+name: Encrypt & Deploy
 
 on:
-  workflow_dispatch:       # 手動実行のみ（自動スケジュールはローカル cron に移行）
+  push:
+    branches: [main]
+    paths:
+      - 'history.json'        # さくらサーバーからの push のみ反応
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -9,19 +13,20 @@ permissions:
   id-token: write
 
 jobs:
-  update:
+  encrypt:
+    # github-actions[bot] 自身の push ではループしないようスキップ
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Fetch data & update graph.html
-        run: node update.js
 
       - name: Encrypt HTML files with password
         env:
@@ -43,10 +48,18 @@ jobs:
             --template-button "認証" \
             --template-title "メッセ三鷹 予測履歴" \
             --template-instructions "パスワードを入力してください"
+          npx staticrypt@3 index.html \
+            --password "$STATICRYPT_PASSWORD" \
+            --directory . \
+            --short \
+            --remember 365 \
+            --template-button "認証" \
+            --template-title "メッセ三鷹" \
+            --template-instructions "パスワードを入力してください"
           # Remember me チェックボックスをデフォルトでオンにする
           node -e "
             const fs = require('fs');
-            ['graph.html','predictions.html'].forEach(f => {
+            ['graph.html','predictions.html','index.html'].forEach(f => {
               if (!fs.existsSync(f)) return;
               let html = fs.readFileSync(f, 'utf8');
               html = html.replace(
@@ -57,17 +70,16 @@ jobs:
             });
           "
 
-      - name: Commit updated files
+      - name: Commit encrypted files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add graph.html predictions.html prediction_history.json graph_data.json graph_data_*.json
-          git add units.json 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "chore: update graph data $(date +'%Y-%m-%d')"
+          git add graph.html predictions.html index.html
+          git diff --staged --quiet || git commit -m "chore: encrypt HTML $(date +'%Y-%m-%d')"
           git push
 
   deploy:
-    needs: update
+    needs: encrypt
     runs-on: ubuntu-latest
     environment:
       name: github-pages

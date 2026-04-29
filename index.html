@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>メッセ三鷹 データ</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: #0f0f13;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      text-align: center;
+      padding: 40px 20px;
+    }
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+      letter-spacing: 0.05em;
+    }
+    .subtitle {
+      font-size: 0.85rem;
+      color: #666;
+      margin-bottom: 48px;
+    }
+    .links {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      width: 280px;
+      margin: 0 auto;
+    }
+    .btn {
+      display: block;
+      padding: 18px 24px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: transform 0.15s, opacity 0.15s;
+    }
+    .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+    .btn-graph {
+      background: linear-gradient(135deg, #1a6bb5, #0d4a8a);
+      color: #fff;
+      border: 1px solid #2a7cc5;
+    }
+    .btn-pred {
+      background: linear-gradient(135deg, #8b2fa8, #5a1a7a);
+      color: #fff;
+      border: 1px solid #9b3fb8;
+    }
+    .btn-label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 400;
+      color: rgba(255,255,255,0.65);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>メッセ三鷹</h1>
+    <p class="subtitle">e牙狼12 XX-MJ データ管理</p>
+    <div class="links">
+      <a href="graph.html" class="btn btn-graph">
+        台別推移グラフ
+        <span class="btn-label">過去40日間の差玉データ</span>
+      </a>
+      <a href="predictions.html" class="btn btn-pred">
+        翌日予測・履歴
+        <span class="btn-label">AIスコアによる狙い台予測</span>
+      </a>
+    </div>
+  </div>
+</body>
+</html>
