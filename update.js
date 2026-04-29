@@ -7,7 +7,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DIR = __dirname;
-const UNITS = [41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57];
+const UNIT_LIST_URL = 'https://daidata.goraggio.com/100563/unit_list?model=e%E7%89%99%E7%8B%BC12%20XX-MJ&ballPrice=4.00&ps=P';
+const UNITS_FILE = path.join(DIR, 'units.json');
+const UNITS_FALLBACK = [41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57];
 const HISTORY_FILE = path.join(DIR, 'history.json');
 const TEMPLATE_FILE = path.join(DIR, 'graph_template.html');
 const OUTPUT_FILE = path.join(DIR, 'graph.html');
@@ -90,11 +92,22 @@ function normalizeDate(mdStr, fetchDate) {
 }
 
 // ============================================================
+// 台リストを動的取得
+// ============================================================
+async function fetchUnitList() {
+  const html = await fetchHtml(UNIT_LIST_URL);
+  const matches = [...html.matchAll(/detail\?unit=(\d+)/g)];
+  const units = [...new Set(matches.map(m => parseInt(m[1])))].sort((a, b) => a - b);
+  if (units.length === 0) throw new Error('台リストが空です');
+  return units;
+}
+
+// ============================================================
 // 全台取得
 // ============================================================
-async function fetchAll(fetchDate) {
+async function fetchAll(fetchDate, units) {
   const results = [];
-  for (const unit of UNITS) {
+  for (const unit of units) {
     const url = `https://daidata.goraggio.com/100563/detail?unit=${unit}`;
     process.stdout.write(`取得中: 台${unit} ... `);
     try {
@@ -293,7 +306,27 @@ function updatePredictionsHtml(predHistory) {
   const now = fetchDate.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
   console.log(`[${now}] データ取得開始`);
 
-  const newData = await fetchAll(fetchDate);
+  // 台リストを動的取得
+  let activeUnits;
+  try {
+    activeUnits = await fetchUnitList();
+    console.log(`台リスト取得: ${activeUnits.length}台 [${activeUnits.join(', ')}]`);
+    const prev = fs.existsSync(UNITS_FILE)
+      ? JSON.parse(fs.readFileSync(UNITS_FILE, 'utf8'))
+      : activeUnits;
+    const added   = activeUnits.filter(u => !prev.includes(u));
+    const removed = prev.filter(u => !activeUnits.includes(u));
+    if (added.length)   console.log(`台追加: ${added.join(', ')}`);
+    if (removed.length) console.log(`台削除: ${removed.join(', ')}`);
+    fs.writeFileSync(UNITS_FILE, JSON.stringify(activeUnits));
+  } catch (e) {
+    console.log(`警告: 台リスト取得失敗 (${e.message})。前回リストを使用。`);
+    activeUnits = fs.existsSync(UNITS_FILE)
+      ? JSON.parse(fs.readFileSync(UNITS_FILE, 'utf8'))
+      : UNITS_FALLBACK;
+  }
+
+  const newData = await fetchAll(fetchDate, activeUnits);
   console.log(`\n取得完了: ${newData.length}台`);
 
   const existing = fs.existsSync(HISTORY_FILE)
@@ -318,7 +351,7 @@ function updatePredictionsHtml(predHistory) {
 
   const history = mergeHistory(existing, newData, fetchDate);
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
-  console.log(`history.json を更新しました（${UNITS.length}台 × 最大${KEEP_DAYS}日）`);
+  console.log(`history.json を更新しました（${activeUnits.length}台 × 最大${KEEP_DAYS}日）`);
 
   updateHtml(history);
 

@@ -63,7 +63,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add graph.html predictions.html prediction_history.json graph_data.json graph_data_*.json
+          git add graph.html predictions.html prediction_history.json units.json graph_data.json graph_data_*.json
           git diff --staged --quiet || git commit -m "chore: update graph data $(date +'%Y-%m-%d')"
           git push
 
