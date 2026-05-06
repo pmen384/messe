@@ -24,7 +24,7 @@ PRED_TEMPLATE_FILE = os.path.join(DIR, 'predictions_template.html')
 PRED_OUTPUT_FILE = os.path.join(DIR, 'predictions.html')
 KEEP_DAYS = 40
 
-DEFAULT_WEIGHTS = {'consecutiveLoss': 20, 'recentCumLoss': 1.0, 'avgDaily': 1.0}
+DEFAULT_WEIGHTS = {'consecutiveLoss': 20, 'recentCumLoss': 1.0, 'avgDaily': 1.0, 'moderateBonus': 10, 'mondayPenalty': 5}
 JST = timezone(timedelta(hours=9))
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
@@ -36,13 +36,20 @@ HEADERS = {
 # ============================================================
 # HTTP取得
 # ============================================================
-def fetch_html(url):
+def fetch_html(url, retries=3, retry_wait=60):
     req = urllib.request.Request(url, headers=HEADERS)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            return res.read().decode('utf-8')
-    except urllib.error.URLError as e:
-        raise Exception(str(e))
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                return res.read().decode('utf-8')
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < retries - 1:
+                print(f'429 レートリミット。{retry_wait}秒待機してリトライ ({attempt + 1}/{retries - 1})...')
+                time.sleep(retry_wait)
+            else:
+                raise Exception(str(e))
+        except urllib.error.URLError as e:
+            raise Exception(str(e))
 
 # ============================================================
 # 台リストを動的取得
@@ -109,7 +116,7 @@ def fetch_all(units):
                 print('データなし')
         except Exception as e:
             print(f'エラー: {e}')
-        time.sleep(0.5)
+        time.sleep(2.0)
     return results
 
 # ============================================================
@@ -157,12 +164,20 @@ def update_predictions_html(pred_history):
 # ============================================================
 # 予測スコア計算
 # ============================================================
-def calc_prediction(history, weights=None):
+def calc_prediction(history, weights=None, fetch_date=None):
     if weights is None:
         weights = DEFAULT_WEIGHTS
 
     all_dates = sorted(set(d for u in history for d in u['days']))
     recent_dates = all_dates[-7:]
+
+    # 月曜ペナルティ（fetch_date が月曜日の場合、翌日=火曜の予測なので適用しない）
+    # fetch_date は「予測を作る日」= 今日。翌日予測なので曜日判定は翌日で行う
+    is_monday_prediction = False
+    if fetch_date is not None:
+        from datetime import timedelta
+        next_day = fetch_date + timedelta(days=1)
+        is_monday_prediction = (next_day.weekday() == 0)  # 月曜=0
 
     results = []
     for u in history:
@@ -183,16 +198,29 @@ def calc_prediction(history, weights=None):
             else:
                 break
 
+        # 連続負け日数を5日でキャップ（過大評価防止）
+        capped_loss = min(consecutive_loss, 5)
+
         recent_cum_loss = sum(min(v, 0) for v in recent_results)
         avg_daily = sum(day_results) / len(day_results)
         recent_avg = sum(recent_results) / len(recent_results) if recent_results else avg_daily
         wins = sum(1 for v in recent_results if v > 0)
         losses = sum(1 for v in recent_results if v < 0)
 
+        # 直近3日の平均が適度なマイナス（-3000〜0）にボーナス
+        last3_vals = [u['days'][d][-1] for d in recent_dates[-3:] if d in u['days'] and u['days'][d]]
+        recent3_avg = sum(last3_vals) / len(last3_vals) if last3_vals else 0
+        moderate_bonus = weights.get('moderateBonus', 10) if -3000 <= recent3_avg < 0 else 0
+
+        # 月曜予測ペナルティ（月曜は出玉が少ない傾向）
+        dow_penalty = weights.get('mondayPenalty', 5) if is_monday_prediction else 0
+
         score = (
-            consecutive_loss * weights['consecutiveLoss']
+            capped_loss * weights['consecutiveLoss']
             + max(0, -recent_cum_loss) / 1000 * weights['recentCumLoss']
             + max(0, -avg_daily) / 500 * weights['avgDaily']
+            + moderate_bonus
+            - dow_penalty
         )
 
         results.append({
@@ -228,7 +256,9 @@ def calc_pdca_weights(pred_history):
     if len(completed) < 5:
         return DEFAULT_WEIGHTS
 
-    factor_hits = {k: {'hit': 0, 'total': 0} for k in DEFAULT_WEIGHTS}
+    # moderateBonus / mondayPenalty は予測結果フィールドに対応しないため除外
+    pdca_factors = {k for k in DEFAULT_WEIGHTS if k not in ('moderateBonus', 'mondayPenalty')}
+    factor_hits = {k: {'hit': 0, 'total': 0} for k in pdca_factors}
 
     for entry in completed:
         hot_preds = entry['predictions'][:3]
@@ -332,7 +362,7 @@ def main():
     print(f'PDCA重み: consecutiveLoss={weights["consecutiveLoss"]}, recentCumLoss={weights["recentCumLoss"]}, avgDaily={weights["avgDaily"]}')
 
     if not any(e['predDate'] == tomorrow_jst for e in pred_history):
-        predictions = calc_prediction(history, weights)[:9]
+        predictions = calc_prediction(history, weights, fetch_date)[:9]
         pred_history.append({
             'predDate': tomorrow_jst,
             'madeAt': today_jst,
